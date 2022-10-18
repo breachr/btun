@@ -1,43 +1,14 @@
 #!/usr/bin/env bash
 # ##########################################################
-scriptname="myproxy"
+scriptname="btun"
 #
 synopsis="tool to run processes in vpn/proxy namespace
 Examples:
 TODO"
-#
-# Description
-# TODO
-#
-# Examples
-# TODO
-#
-requirements=(
-)
-#
-version="0.1"
-#
-# HISTORY:
-#
-# * 201X-03-31 - v0.1  - First creation
-# * 201X-04-07 - v0.2  - Added support for XX
-# * 201X-05-26 - v1.0  - Major Release
-#
-# TODO:
-#
-# ##########################################################
-# Imports
-
-#script_path="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-#source_location="${script_path}/../../Code/Bash/bashmacy/*"
-#for f in $source_location; do source $f; done
-
 # ##########################################################
 kill=false
 # Main
 function main_script() {
-  # main_scripts docstring
-
   if [ $USER != "root" ]; then
       echo "This must be run as root."
       exit 1
