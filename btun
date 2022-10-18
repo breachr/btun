@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# ##########################################################
+scriptname="myproxy"
+#
+synopsis="tool to run processes in vpn/proxy namespace
+Examples:
+TODO"
+#
+# Description
+# TODO
+#
+# Examples
+# TODO
+#
+requirements=(
+)
+#
+version="0.1"
+#
+# HISTORY:
+#
+# * 201X-03-31 - v0.1  - First creation
+# * 201X-04-07 - v0.2  - Added support for XX
+# * 201X-05-26 - v1.0  - Major Release
+#
+# TODO:
+#
+# ##########################################################
+# Imports
+
+#script_path="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+#source_location="${script_path}/../../Code/Bash/bashmacy/*"
+#for f in $source_location; do source $f; done
+
+# ##########################################################
+kill=false
+# Main
+function main_script() {
+  # main_scripts docstring
+
+  if [ $USER != "root" ]; then
+      echo "This must be run as root."
+      exit 1
+  fi
+
+  target=$args
+  clear
+  NS_EXEC="ip netns exec $target"
+
+  if [ "${kill}" = true ] ; then
+    echo "killing namespace: $target";
+    killall -9 $target
+    ip netns pids $target | xargs -rd'\n' kill
+    # TODO wait for terminate
+    # clear NAT > TODO Do it only for specific IFACES
+    # iptables -t nat -D POSTROUTING -o enp34s0 -m mark --mark 0x29a -j MASQUERADE
+    # iptables -t nat -D POSTROUTING -o wlan+ -m mark --mark 0x29a -j MASQUERADE
+    # iptables -t mangle -D PREROUTING -i vpn0 -j MARK --set-xmark 0x29a/0xffffffff
+    echo "Deleting network interface"
+    rm -rf /etc/netns/$target
+    # ip link delete vpn0
+    ip netns delete $target
+  elif ip netns | grep $target ; then
+    echo "namespace exists.. joining"
+    $NS_EXEC sudo -u breachr zsh
+    # host myip.opendns.com resolver1.opendns.com
+  else
+    echo "namespace doesnt exist.. creating"
+    cat /home/breachr/OneDrive/ATTACK/FILE/Breachbox/tunnel/$target || exit
+  
+    ip netns add $target
+
+    # Start the loopback interface in the namespace
+    $NS_EXEC ip addr add 127.0.0.1/8 dev lo
+    $NS_EXEC ip link set lo up
+
+    # Create virtual network interfaces that will let OpenVPN (in the
+    # namespace) access the real network, and configure the interface in the
+    # namespace (${target}_PEER) to use the interface out of the namespace (${target}_LINK) as its
+    # default gateway
+    ip link add ${target}_LINK type veth peer name ${target}_PEER
+    ip link set ${target}_LINK up
+    ip link set ${target}_PEER netns $target up
+
+    nw=200
+    while [ `ip addr | grep "$nw" | wc -l` -gt 0 ]; do
+    nw=$((nw+1))
+    done
+
+    ip addr add 10.$nw.200.1/24 dev ${target}_LINK
+    $NS_EXEC ip addr add 10.$nw.200.2/24 dev ${target}_PEER
+    $NS_EXEC ip link set dev ${target}_PEER mtu 1492
+    $NS_EXEC ip route add default via 10.$nw.200.1 dev ${target}_PEER
+
+    # Configure the nameserver to use inside the namespace
+    # TODO use VPN-provided DNS servers in order to prevent leaks
+    mkdir -p /etc/netns/$target
+    cat >/etc/netns/$target/resolv.conf <<EOF || exit 1
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+EOF
+
+    # IPv4 NAT, you may need to adjust the interface name prefixes 'eth' 'wlan'
+    iptables -t nat -A POSTROUTING -o eth+ -m mark --mark 0x29a -j MASQUERADE
+    iptables -t nat -A POSTROUTING -o wlan+ -m mark --mark 0x29a -j MASQUERADE
+
+    #iptables -t nat -A POSTROUTING -o wlan+ -m mark --mark 0x29a -j MASQUERADE
+    iptables -t mangle -A PREROUTING -i ${target}_LINK -j MARK --set-xmark 0x29a/0xffffffff
+
+    # TODO create firewall rules for your specific application (torrent)
+    # or just comment the line below
+    #$NS_EXEC iptables-restore < /etc/iptables/iptables-$target.rules
+
+    # we should have full network access in the namespace
+    echo "googleing"
+    $NS_EXEC ping -c 3 www.google.com || exit
+
+    # start OpenVPN in the namespace
+    echo "Starting VPN"
+    cd /home/breachr/OneDrive/ATTACK/FILE/Breachbox/tunnel
+    # TODO create openvpn configuration in /etc/openvpn/$target.conf
+    $NS_EXEC openvpn --config $target &
+
+    # wait for the tunnel interface to come up
+    # while ! $NS_EXEC ip link show dev tun0 >/dev/null 2>&1 ; do sleep .5 ; done
+
+    echo "Joining namespace.."
+    $NS_EXEC sudo -u breachr -E env "PATH=$PATH" zsh
+  fi
+}
+
+# ##########################################################
+# Arg Parser
+args=()
+usage() {
+  echo -n "`basename "$0"` [OPTIONS]... [TARGET]...
+  $synopsis
+
+  -k, --kill        Kill namespace
+  -h, --help        Display this help and exit
+      --version     Output version information and exit
+  "
+}
+
+# [[ $# -eq 0 ]] && set -- "--help" # Uncomment to force arguments when invoking the script
+while [[ $1 = -?* ]]; do
+  case $1 in
+    -k|--kill) kill=true ;;
+    -l|--log) logging=true ;;
+    -h|--help) usage >&2; exit ;;
+    --version) echo "$(basename $0) ${version}"; exit ;;
+    --endopts) shift; break ;;
+    *) echo "invalid option: '$1'. Exiting" 1>&2; exit 1 ;;
+  esac
+  shift
+done
+args+=("$@") # Store the remaining part as arguments.
+
+# ##########################################################
+# Startup
+set -o pipefail # Always return highest exitcode
+export LC_ALL=C
+
+main_script
+
+# echo "Exitcode: $?" # echoes exit code of main script
+# stop VPN on exit (even when error occured)
+# trap stop_vpn EXIT
+# 
